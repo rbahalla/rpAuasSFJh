@@ -14,8 +14,8 @@ def dict_factory(cursor, row):
 
 @app.route('/', methods=['GET'])
 def home():
-    return '''<h1>Distant Reading Archive</h1>
-<p>A prototype API for distant reading of science fiction novels.</p>'''
+    return '''<h1>User API for Genesys Interview</h1>
+<p>Prototype for Genesys Interview.</p>'''
 
 
 @app.route('/api/v1/users/all', methods=['GET'])
@@ -28,61 +28,72 @@ def get_all():
     return jsonify(all_users)
 
 
-
 @app.errorhandler(404)
 def page_not_found(e):
-    return "<h1>404</h1><p>The resource could not be found.</p>", 404
+    return  jsonify({'errors': 'The resource could not be found'}), 404
 
 
 @app.route('/api/v1/users', methods=['GET'])
 def user_filter():
-    query_parameters = request.args
+    try:
+        conn = sqlite3.connect('users.db')
+        conn.row_factory = dict_factory
+        cur = conn.cursor()
+        msg = ""
+        query_parameters = request.args
+        id = query_parameters.get('id')
+        fullname = query_parameters.get('name')
+        email = query_parameters.get('email')
+        
+        query = "SELECT id,name,email FROM users WHERE "
+        filter_values = []
+        filter_list = []
+       
+        if id:        
+            filter_list.append("id=?")
+            filter_values.append(id)
+        if fullname:
+            filter_list.append("name=?")
+            filter_values.append(fullname)
+        if email:
+            filter_list.append("email=?")
+            filter_values.append(email)        
+        if not (id or fullname or email):
+            msg =  page_not_found(404)
+            return 
+        
+        query += " AND ".join(filter_list)        
 
-    id = query_parameters.get('id')
-    fullname = query_parameters.get('fullname')
-    email = query_parameters.get('email')
-
-    query = "SELECT id,name,email FROM users WHERE"
-    to_filter = []
-
-    if id:
-        query += ' id=? AND'
-        to_filter.append(id)
-    if fullname:
-        query += ' Name=? AND'
-        to_filter.append(fullname)
-    if email:
-        query += ' Email=? AND'
-        to_filter.append(email)
-    if not (id or fullname or email):
-        return page_not_found(404)
-
-    query = query[:-4] + ';'
-
-    conn = sqlite3.connect('users.db')
-    conn.row_factory = dict_factory
-    cur = conn.cursor()
-
-    results = cur.execute(query, to_filter).fetchall()
-
-    return jsonify(results)
+        results = cur.execute(query, filter_values).fetchall()
+        msg = jsonify(results)
+    except:
+        conn.rollback()
+        msg = jsonify({'errors': 'Error Encountered while retrieving record'}), 400
+    
+    finally:
+        conn.close()
+        return msg
     
 @app.route('/api/v1/users', methods=['POST'])
 def create():
     try:
-        name = request.form['name']
-        email = request.form['email']                
-        password = request.form['password']                
-        query = 'INSERT INTO users (Name, Email, Password) VALUES (?,?,?)'
         conn = sqlite3.connect('users.db')        
         cur = conn.cursor()
+        name = request.form.get('name')
+        email = request.form.get('email')                
+        password = request.form.get('password')               
+        query = 'INSERT INTO users (Name, Email, Password) VALUES (?,?,?)'
+
+        if not (name and email and password):
+            msg = jsonify({'errors': 'Invalid Request. Check your parameters'}), 400
+            return 
 
         cur.execute(query, (name, email, password))
         conn.commit()
-        msg = "Record Created"
+        msg = jsonify({'errors': 'Record Created'})
     except:
         conn.rollback()
-        msg = "Error Encountered while creating record"
+        msg = jsonify({'errors': 'Error Encountered while creating record'}), 400
     
     finally:
         conn.close()
@@ -91,22 +102,44 @@ def create():
 @app.route('/api/v1/users', methods=['PUT'])
 def update():
     try:
+        conn = sqlite3.connect('users.db')   
         query_parameters = request.args
-        id = query_parameters.get('id')
-        name = request.form['name']
-        email = request.form['email'] 
-        password = request.form['password']    
+        msg = ""
+        update_values = []
+        update_list = []
+        id = query_parameters.get('id')     
+        if not (id):
+            msg = page_not_found(404)  
+            return  
+        name = request.form.get("name")
+        email = request.form.get("email")
+        password = request.form.get("password")   
         
-        query = 'UPDATE users set Name = ?, Email = ?, Password = ? WHERE Id = ?'
-        conn = sqlite3.connect('users.db')        
-        cur = conn.cursor()
+        query = 'UPDATE users set '        
+        if password:            
+            update_list.append("Password = ?")            
+            update_values.append(password)            
+        if name:           
+            update_list.append("Name = ?")
+            update_values.append(name)
+        if email:         
+            update_list.append("Email = ?")
+            update_values.append(email)
+        if id:
+            query += ",".join(update_list)+" WHERE Id = ?"            
+            update_values.append(id)
+        if not (name or email or password):
+            msg = jsonify({'errors': 'Invalid Request. Check your parameters'}), 400
+            return 
 
-        cur.execute(query, (name, email, password, id))
+        msg = query             
+        cur = conn.cursor()
+        cur.execute(query, update_values)
         conn.commit()
-        msg = "Record Updated"
+        msg = jsonify({'success': 'Record Updated'}), 200
     except:
         conn.rollback()
-        msg = "Error Encountered while updating record"
+        msg = jsonify({'errors': 'Error Encountered while updating record'}), 400
     
     finally:
         conn.close()
@@ -123,10 +156,10 @@ def delete():
 
         cur.execute(query, id)
         conn.commit()
-        msg = "Record Deleted"
+        msg = jsonify({'success': 'Record Deleted'+test})
     except:
         conn.rollback()
-        msg = "Error Encountered while deleting record"
+        msg = jsonify({'errors': 'Error Encountered while deleting record'}), 400
     
     finally:
         conn.close()
@@ -135,23 +168,25 @@ def delete():
 @app.route('/api/v1/users/login', methods=['POST'])
 def login():
     try:
-        email = request.form['email'].strip() 
-        password = request.form['password'].strip()
-           
         conn = sqlite3.connect('users.db')
+        email = request.form.get('email') 
+        password = request.form.get('password')
+        if not (email and password):
+            msg = jsonify({'errors': 'Invalid Request. Check your parameters'}), 400
+            return 
+        msg = ""        
         query = 'SELECT id,name,email FROM users WHERE Email = ? AND Password = ?'
         conn.row_factory = dict_factory
         cur = conn.cursor()
-       
-        login_user = cur.execute(query, (email, password)).fetchone()        
 
-        return jsonify(login_user)
+        login_user = cur.execute(query, (email.strip(), password.strip())).fetchone()      
+        msg = jsonify(login_user)
     except:
         conn.rollback()
         msg = "Error Encountered while logging in"
     
     finally:
         conn.close()
-        #return msg
+        return msg
 
 app.run()
