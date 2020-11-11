@@ -25,7 +25,7 @@ def get_all():
     cur = conn.cursor()
     all_users = cur.execute('SELECT id,name,email FROM users;').fetchall()
 
-    return jsonify(all_users)
+    return jsonify({'count':len(all_users), 'results': all_users})
 
 
 @app.errorhandler(404)
@@ -65,7 +65,7 @@ def user_filter():
         query += " AND ".join(filter_list)        
 
         results = cur.execute(query, filter_values).fetchall()
-        msg = jsonify(results)
+        msg = jsonify({'count':len(results), 'results': results})
     except:
         conn.rollback()
         msg = jsonify({'errors': 'Error Encountered while retrieving record'}), 400
@@ -90,7 +90,7 @@ def create():
 
         cur.execute(query, (name, email, password))
         conn.commit()
-        msg = jsonify({'errors': 'Record Created'})
+        msg = jsonify({'success': 'Record Created'})
     except:
         conn.rollback()
         msg = jsonify({'errors': 'Error Encountered while creating record'}), 400
@@ -156,7 +156,7 @@ def delete():
 
         cur.execute(query, id)
         conn.commit()
-        msg = jsonify({'success': 'Record Deleted'+test})
+        msg = jsonify({'success': 'Record Deleted'})
     except:
         conn.rollback()
         msg = jsonify({'errors': 'Error Encountered while deleting record'}), 400
@@ -179,8 +179,11 @@ def login():
         conn.row_factory = dict_factory
         cur = conn.cursor()
 
-        login_user = cur.execute(query, (email.strip(), password.strip())).fetchone()      
-        msg = jsonify(login_user)
+        login_user = cur.execute(query, (email.strip(), password.strip())).fetchone()     
+        if login_user:
+            msg =  jsonify(login_user)
+        else:
+            msg = jsonify({"invalid": "Invalid Username or Password"}), 401        
     except:
         conn.rollback()
         msg = "Error Encountered while logging in"
